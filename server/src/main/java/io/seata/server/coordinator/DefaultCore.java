@@ -56,7 +56,7 @@ public class DefaultCore implements Core {
     private static final int RETRY_XAER_NOTA_TIMEOUT = ConfigurationFactory.getInstance().getInt(XAER_NOTA_RETRY_TIMEOUT,
             DefaultValues.DEFAULT_XAER_NOTA_RETRY_TIMEOUT);
 
-    private static Map<BranchType, AbstractCore> coreMap = new ConcurrentHashMap<>();
+    private static final Map<BranchType, AbstractCore> CORE_MAP = new ConcurrentHashMap<>();
 
     /**
      * get the Default core.
@@ -68,7 +68,7 @@ public class DefaultCore implements Core {
             new Class[] {RemotingServer.class}, new Object[] {remotingServer});
         if (CollectionUtils.isNotEmpty(allCore)) {
             for (AbstractCore core : allCore) {
-                coreMap.put(core.getHandleBranchType(), core);
+                CORE_MAP.put(core.getHandleBranchType(), core);
             }
         }
     }
@@ -80,7 +80,7 @@ public class DefaultCore implements Core {
      * @return the core
      */
     public AbstractCore getCore(BranchType branchType) {
-        AbstractCore core = coreMap.get(branchType);
+        AbstractCore core = CORE_MAP.get(branchType);
         if (core == null) {
             throw new NotSupportYetException("unsupported type:" + branchType.name());
         }
@@ -94,7 +94,7 @@ public class DefaultCore implements Core {
      * @param core       the core
      */
     public void mockCore(BranchType branchType, AbstractCore core) {
-        coreMap.put(branchType, core);
+        CORE_MAP.put(branchType, core);
     }
 
     @Override
@@ -217,6 +217,7 @@ public class DefaultCore implements Core {
                     switch (branchStatus) {
                         case PhaseTwo_Committed:
                             SessionHelper.removeBranch(globalSession, branchSession, !retrying);
+                            LOGGER.info("Commit branch transaction successfully, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
                             return CONTINUE;
                         case PhaseTwo_CommitFailed_Unretryable:
                             //not at branch
@@ -259,14 +260,14 @@ public class DefaultCore implements Core {
                 LOGGER.info("Committing global transaction is NOT done, xid = {}.", globalSession.getXid());
                 return false;
             }
-            if (!retrying) {
-                //contains not AT branch
-                globalSession.setStatus(GlobalStatus.Committed);
-            }
         }
         // if it succeeds and there is no branch, retrying=true is the asynchronous state when retrying. EndCommitted is
         // executed to improve concurrency performance, and the global transaction ends..
         if (success && globalSession.getBranchSessions().isEmpty()) {
+            if (!retrying) {
+                //contains not AT branch
+                globalSession.setStatus(GlobalStatus.Committed);
+            }
             SessionHelper.endCommitted(globalSession, retrying);
             LOGGER.info("Committing global transaction is successfully done, xid = {}.", globalSession.getXid());
         }
@@ -325,10 +326,10 @@ public class DefaultCore implements Core {
                             return CONTINUE;
                         case PhaseTwo_RollbackFailed_Unretryable:
                             SessionHelper.endRollbackFailed(globalSession, retrying);
-                            LOGGER.info("Rollback branch transaction fail and stop retry, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
+                            LOGGER.error("Rollback branch transaction fail and stop retry, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
                             return false;
                         default:
-                            LOGGER.info("Rollback branch transaction fail and will retry, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
+                            LOGGER.error("Rollback branch transaction fail and will retry, xid = {} branchId = {}", globalSession.getXid(), branchSession.getBranchId());
                             if (!retrying) {
                                 globalSession.queueToRetryRollback();
                             }
